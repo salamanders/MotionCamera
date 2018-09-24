@@ -28,13 +28,16 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
-    implementation 'androidx.appcompat:appcompat:1.0.0-rc02'
+    implementation 'androidx.appcompat:appcompat:1.0.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.0.0-alpha2'
 
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:0.26.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:0.26.1'
 
     implementation 'com.github.ajalt:timberkt:1.5.1'
+
+    // https://mvnrepository.com/artifact/ar.com.hjg/pngj
+    implementation group: 'ar.com.hjg', name: 'pngj', version: '2.1.0'
 
     testImplementation 'junit:junit:4.12'
     androidTestImplementation 'com.android.support.test:runner:1.0.2'
