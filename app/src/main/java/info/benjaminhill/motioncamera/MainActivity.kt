@@ -50,6 +50,7 @@ class MainActivity : ScopedActivity() {
             w { "CAPTURING IMAGE NOW" }
             val ic = ImageCapture(albumFolder)
             captureStill().use { image ->
+                i { "captureStill returned an image of ${image.width}x${image.height}" }
                 ic.processImage(image)
             }
         }
@@ -76,6 +77,7 @@ class MainActivity : ScopedActivity() {
             } else {
                 cameraPreviewTextureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+                        i { "cameraPreviewTextureView available with res ($width x $height)" }
                         cont.resume(Surface(surfaceTexture))
                     }
 
@@ -85,7 +87,8 @@ class MainActivity : ScopedActivity() {
                 }
             }
         }
-        i { "previewSurface: ${previewSurface.isValid}" }
+
+        i { "previewSurface: ${previewSurface.isValid} (${cameraPreviewTextureView.layoutParams.width}x${cameraPreviewTextureView.layoutParams.height})" }
 
         @SuppressLint("MissingPermission")
         cameraDevice = suspendCoroutine { cont ->
@@ -129,6 +132,12 @@ class MainActivity : ScopedActivity() {
                 .minBy { it.width * it.height }!!
         i { "imageSizeForYUVImageReader (smallest): $imageSizeForYUVImageReader" }
 
+        val imageSizeForPreview: Size = cameraCharacteristics
+                .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
+                .getOutputSizes(SurfaceTexture::class.java)
+                .minBy { it.width * it.height }!!
+        i { "imageSizeForPreview (smallest): $imageSizeForPreview" }
+
         imageReaderYUV = ImageReader.newInstance(imageSizeForYUVImageReader.width, imageSizeForYUVImageReader.height, ImageFormat.YUV_420_888, 3)
 
         cameraCaptureSession = suspendCoroutine { cont ->
@@ -158,6 +167,8 @@ class MainActivity : ScopedActivity() {
     }
 
     private suspend fun captureStill(): Image = suspendCoroutine { cont ->
+        i { "About to capture a still.  imageReaderYUV.width=${imageReaderYUV.width}, preview.width=${cameraPreviewTextureView.width}" }
+
         val captureRequestStill = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
         captureRequestStill.addTarget(imageReaderYUV.surface)
         imageReaderYUV.setOnImageAvailableListener({ cont.resume(imageReaderYUV.acquireLatestImage()) }, backgroundHandler)

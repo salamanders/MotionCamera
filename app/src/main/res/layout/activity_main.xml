@@ -8,9 +8,7 @@
 
     <TextureView
         android:id="@+id/cameraPreviewTextureView"
-        android:layout_width="176dp"
-        android:layout_height="144dp"
-        android:layout_gravity = "center"
-        />
-
+        android:layout_width="176px"
+        android:layout_height="144px"
+        android:layout_gravity="center" />
 </FrameLayout>
