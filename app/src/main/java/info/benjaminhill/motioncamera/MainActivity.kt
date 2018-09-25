@@ -1,9 +1,7 @@
 package info.benjaminhill.motioncamera
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
@@ -15,10 +13,6 @@ import android.os.HandlerThread
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
-import androidx.core.app.ActivityCompat
-import ar.com.hjg.pngj.ImageInfo
-import ar.com.hjg.pngj.ImageLineByte
-import ar.com.hjg.pngj.PngWriter
 import com.github.ajalt.timberkt.Timber
 import com.github.ajalt.timberkt.d
 import com.github.ajalt.timberkt.i
@@ -27,13 +21,17 @@ import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.experimental.delay
 import kotlinx.coroutines.experimental.launch
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.experimental.suspendCoroutine
 
 
 class MainActivity : ScopedActivity() {
+    private lateinit var backgroundHandler: Handler
+    private lateinit var cameraManager: CameraManager
+    private lateinit var cameraDevice: CameraDevice
+    private lateinit var cameraCaptureSession: CameraCaptureSession
+    private lateinit var imageReaderYUV: ImageReader
+    private lateinit var albumFolder: File
 
     override fun onResume() {
         super.onResume()
@@ -41,92 +39,22 @@ class MainActivity : ScopedActivity() {
             w { "Skipping this onResume because still missing permissions: ${missingPermissions.joinToString(", ")}" }
             return
         }
+
+        albumFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "/Camera/motioncam").apply {
+            mkdir()
+        }
+
         launch {
             cameraSetup()
-
-            delay(1, TimeUnit.SECONDS)
-
-            val albumFolder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "/Camera/motioncam")
-            albumFolder.mkdirs()
-
+            delay(5, TimeUnit.SECONDS)
+            w { "CAPTURING IMAGE NOW" }
+            val ic = ImageCapture(albumFolder)
             captureStill().use { image ->
-                val format = image.format
-                require(format == ImageFormat.YUV_420_888)
-                require(image.width == image.cropRect.width()) { "Image width and plane width should match: ${image.width}!=${image.cropRect.width()}" }
-
-                val yPlane = image.planes[0]
-                val bb = yPlane.buffer
-                bb.rewind() // necessary?
-                val bytes = ByteArray(bb.remaining())
-                bb.get(bytes)
-
-                require(yPlane.pixelStride == 1) { "pixel stride from YUV_420_888 should not be interleaved." }
-
-                if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                    throw IllegalStateException("Missing required permission WRITE_EXTERNAL_STORAGE, try guarding with EZPermission.")
-                }
-
-                /*
-                try {
-                    val gsBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
-
-                    val imageFile = File(albumFolder, "mc_${SDF.format(Date())}.png")
-                    FileOutputStream(imageFile).use { fos ->
-                        gsBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
-                    }
-
-                    MediaScannerConnection.scanFile(this@MainActivity, arrayOf(imageFile.toString()), arrayOf("image/png")) { filePath, u ->
-                        i { "MediaScanner scanFile finished $filePath $u" }
-                    }
-                } catch(e:Exception) {
-                    Timber.e(e)
-                }
-                */
-
-                try {
-                    val cropRect = image.cropRect
-                    val width = cropRect.width()
-                    val height = cropRect.height()
-
-                    i { "Writing to $width x $height" }
-                    // int cols, int rows, int bitdepth, boolean alpha, boolean grayscale, boolean indexed
-                    val grayii = ImageInfo(
-                            width,
-                            height,
-                            8,
-                            false,
-                            true,
-                            false
-                    )
-
-                    val imageFile = File(albumFolder, "mc2_${SDF.format(Date())}.png")
-                    val pngw = PngWriter(imageFile, grayii, true)
-                    for (rowNum: Int in 0 until height) {
-                        val row = ImageLineByte(grayii, ByteArray(width))
-                        val rowLine = row.scanline
-                        System.arraycopy(
-                                bytes,
-                                rowNum * yPlane.rowStride,
-                                rowLine,
-                                0,
-                                yPlane.rowStride
-                        )
-                        pngw.writeRow(row)
-                    }
-                    pngw.end()
-                    i { "imageFile: ${imageFile.path} ${imageFile.length()}"}
-                } catch (e: Exception) {
-                    Timber.e(e)
-                }
+                ic.processImage(image)
             }
         }
     }
 
-    private lateinit var backgroundHandler: Handler
-    private lateinit var cameraManager: CameraManager
-    private lateinit var cameraDevice: CameraDevice
-    private lateinit var cameraCaptureSession: CameraCaptureSession
-    private lateinit var imageReaderYUV: ImageReader
 
     private suspend fun cameraSetup() {
         i { "Launching camera setup " }
@@ -204,9 +132,9 @@ class MainActivity : ScopedActivity() {
         imageReaderYUV = ImageReader.newInstance(imageSizeForYUVImageReader.width, imageSizeForYUVImageReader.height, ImageFormat.YUV_420_888, 3)
 
         cameraCaptureSession = suspendCoroutine { cont ->
-            cameraDevice.createCaptureSession(Arrays.asList(previewSurface, imageReaderYUV.surface), object : CameraCaptureSession.StateCallback() {
+            cameraDevice.createCaptureSession(listOf(previewSurface, imageReaderYUV.surface), object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) = cont.resume(session).also {
-                    d { "Created cameraCaptureSession through createCaptureSession.onConfigured" }
+                    d { "Created cameraCaptureSession through createCaptureSession.onConfigured, with two target surfaces" }
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -230,18 +158,9 @@ class MainActivity : ScopedActivity() {
     }
 
     private suspend fun captureStill(): Image = suspendCoroutine { cont ->
-        val captureRequestStill = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_VIDEO_SNAPSHOT).apply {
-            addTarget(imageReaderYUV.surface)
-        }
-        val onYUVImageAvailableForImageReader = ImageReader.OnImageAvailableListener {
-            i { "onYUVImageAvailableForImageReader" }
-            cont.resume(imageReaderYUV.acquireLatestImage())
-        }
-        imageReaderYUV.setOnImageAvailableListener(onYUVImageAvailableForImageReader, backgroundHandler)
+        val captureRequestStill = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+        captureRequestStill.addTarget(imageReaderYUV.surface)
+        imageReaderYUV.setOnImageAvailableListener({ cont.resume(imageReaderYUV.acquireLatestImage()) }, backgroundHandler)
         cameraCaptureSession.capture(captureRequestStill.build(), null, backgroundHandler)
-    }
-
-    companion object {
-        private val SDF = SimpleDateFormat("yyyyMMddhhmmssSSS", Locale.US)
     }
 }
